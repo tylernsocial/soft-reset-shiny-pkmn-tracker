@@ -1,0 +1,4 @@
+whatever image you put here will be used to increment the counter
+
+ie: image of nintendo logo
+everytime the script sees the nintendo logo it will increment the shiny hunt counter
