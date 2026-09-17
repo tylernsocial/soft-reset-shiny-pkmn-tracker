@@ -18,18 +18,28 @@ REGION_Y = 0
 REGION_WIDTH = 600
 REGION_HEIGHT = 400
 
+TEMPLATE_PATH = "./reset_templates/reset_template.png"
+
+
+# Load our reference reset image
+template = cv2.imread(TEMPLATE_PATH)
+
+# Make sure OpenCV actually found the image
+if template is None:
+    print("ERROR: Could not load reset template.")
+    print(f"Checked: {TEMPLATE_PATH}")
+    exit()
+
+# Convert template to grayscale
+template_gray = cv2.cvtColor(
+    template,
+    cv2.COLOR_BGR2GRAY
+)
+
 with MSS() as sct:
 
-    # Get information about the second monitor
     monitor = sct.monitors[MONITOR_NUMBER]
 
-    print("Monitor information:")
-    print(monitor)
-
-    # Create our capture region.
-    #
-    # monitor["left"] and monitor["top"] tell us where
-    # monitor 2 begins on the overall Windows desktop.
     region = {
         "left": monitor["left"] + REGION_X,
         "top": monitor["top"] + REGION_Y,
@@ -37,32 +47,66 @@ with MSS() as sct:
         "height": REGION_HEIGHT
     }
 
-    print("Watching region:")
-    print(region)
-
     while True:
 
-        # Capture the selected region
+        # Capture the selected part of monitor 2
         screenshot = sct.grab(region)
 
-        # Convert MSS screenshot into a NumPy array
+        # Convert the screenshot into a NumPy array
         frame = np.array(screenshot)
 
-        # MSS gives us BGRA.
-        # Convert it to BGR so OpenCV can display it normally.
+        # Convert BGRA -> BGR
         frame = cv2.cvtColor(
             frame,
             cv2.COLOR_BGRA2BGR
         )
 
-        # Show exactly what Python currently sees
-        cv2.imshow("Shiny Counter - Capture Preview", frame)
+        # Convert current frame to grayscale
+        gray_frame = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2GRAY
+        )
+
+
+        # --------------------------
+        # TEMPLATE MATCHING
+        # --------------------------
+
+        result = cv2.matchTemplate(
+            gray_frame,
+            template_gray,
+            cv2.TM_CCOEFF_NORMED
+        )
+
+        # Get the best match score
+        _, max_score, _, max_location = cv2.minMaxLoc(result)
+
+        # Convert 0.95 -> 95%
+        match_percent = max_score * 100
+
+        print(f"Match: {match_percent:.2f}%")
+
+
+        # --------------------------
+        # DISPLAY
+        # --------------------------
+
+        cv2.imshow(
+            "Shiny Counter - Capture Preview",
+            frame
+        )
+
+        key = cv2.waitKey(1) & 0xFF
+
+        # Press S to overwrite the saved reset template
+        if key == ord("s"):
+            cv2.imwrite(TEMPLATE_PATH, frame)
+            print("Reset template saved!")
 
         # Press Q to quit
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        if key == ord("q"):
             break
 
-        # Small delay so we're not capturing unnecessarily fast
         time.sleep(0.05)
 
 
