@@ -1,6 +1,8 @@
 import queue
 import threading
 from pathlib import Path
+import tkinter as tk
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 import cv2
@@ -30,6 +32,10 @@ RELEASE_THRESHOLD = 0.70
 APP_FOLDER = Path(__file__).resolve().parent
 TEMPLATE_PATH = APP_FOLDER / "reset_templates" / "reset_template.png"
 COUNT_FILE = APP_FOLDER / "count.txt"
+HUNT_IMAGE_PATH = APP_FOLDER / "current_hunt.png"
+
+HUNT_IMAGE_WIDTH = 220
+HUNT_IMAGE_HEIGHT = 105
 
 
 # ============================================================
@@ -85,7 +91,7 @@ class ShinyCounterApp(ctk.CTk):
     def setup_gui(self):
         """Create the small, light CustomTkinter interface."""
         self.title("Shiny Hunt Counter")
-        self.geometry("350x340")
+        self.geometry("350x550")
         self.resizable(False, False)
         self.configure(fg_color="#F7F8FA")
 
@@ -99,6 +105,53 @@ class ShinyCounterApp(ctk.CTk):
         )
         title_label.grid(row=0, column=0, padx=24, pady=(20, 12))
 
+        hunt_card = ctk.CTkFrame(
+            self,
+            width=302,
+            height=190,
+            corner_radius=18,
+            fg_color="#FFFFFF",
+            border_width=1,
+            border_color="#E5E7EB",
+        )
+        hunt_card.grid(row=1, column=0, padx=24, sticky="ew")
+        hunt_card.grid_propagate(False)
+        hunt_card.grid_columnconfigure(0, weight=1)
+
+        hunt_title = ctk.CTkLabel(
+            hunt_card,
+            text="Currently Hunting",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#374151",
+        )
+        hunt_title.grid(row=0, column=0, pady=(8, 2))
+
+        self.hunt_image_label = ctk.CTkLabel(
+            hunt_card,
+            text="No Pokémon image selected",
+            width=HUNT_IMAGE_WIDTH,
+            height=HUNT_IMAGE_HEIGHT,
+            font=ctk.CTkFont(size=13),
+            text_color="#6B7280",
+        )
+        self.hunt_image_label.grid(row=1, column=0)
+
+        self.image_button = ctk.CTkButton(
+            hunt_card,
+            text="Add Shiny Image",
+            width=180,
+            height=30,
+            corner_radius=9,
+            fg_color="#7C3AED",
+            hover_color="#6D28D9",
+            command=self.select_hunt_image,
+        )
+        self.image_button.grid(row=2, column=0, pady=(4, 8))
+
+        # Keep a reference to the Tk image for as long as the label exists.
+        self.hunt_photo = None
+        self.load_hunt_image()
+
         counter_card = ctk.CTkFrame(
             self,
             width=302,
@@ -108,7 +161,7 @@ class ShinyCounterApp(ctk.CTk):
             border_width=1,
             border_color="#E5E7EB",
         )
-        counter_card.grid(row=1, column=0, padx=24, sticky="ew")
+        counter_card.grid(row=2, column=0, padx=24, pady=(10, 0), sticky="ew")
         counter_card.grid_propagate(False)
         counter_card.grid_columnconfigure(0, weight=1)
 
@@ -142,10 +195,10 @@ class ShinyCounterApp(ctk.CTk):
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color="#2563EB",
         )
-        self.status_label.grid(row=2, column=0, pady=(10, 8))
+        self.status_label.grid(row=3, column=0, pady=(10, 8))
 
         button_row = ctk.CTkFrame(self, fg_color="transparent")
-        button_row.grid(row=3, column=0)
+        button_row.grid(row=4, column=0)
 
         minus_button = ctk.CTkButton(
             button_row,
@@ -183,7 +236,91 @@ class ShinyCounterApp(ctk.CTk):
             text_color="#374151",
             command=self.reset_count,
         )
-        reset_button.grid(row=4, column=0, pady=(10, 16))
+        reset_button.grid(row=5, column=0, pady=(10, 16))
+
+    # ========================================================
+    # CURRENT HUNT IMAGE
+    # ========================================================
+
+    def select_hunt_image(self):
+        """Let the user choose an image and save a fitted local copy."""
+        selected_path = filedialog.askopenfilename(
+            parent=self,
+            title="Choose a shiny Pokémon image",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.webp *.bmp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not selected_path:
+            return
+
+        try:
+            # Reading through NumPy also supports file paths containing Unicode
+            # characters, which cv2.imread can struggle with on Windows.
+            image_bytes = np.fromfile(selected_path, dtype=np.uint8)
+            image = cv2.imdecode(image_bytes, cv2.IMREAD_UNCHANGED)
+            if image is None:
+                raise ValueError("The selected file is not a supported image.")
+
+            fitted_image = self.fit_hunt_image(image)
+            encoded, png_data = cv2.imencode(".png", fitted_image)
+            if not encoded:
+                raise ValueError("The image could not be converted to PNG.")
+
+            HUNT_IMAGE_PATH.write_bytes(png_data.tobytes())
+            self.load_hunt_image()
+        except (OSError, ValueError, cv2.error) as error:
+            messagebox.showerror(
+                "Could Not Add Image",
+                f"The selected image could not be loaded.\n\n{error}",
+                parent=self,
+            )
+
+    @staticmethod
+    def fit_hunt_image(image):
+        """Fit an image inside the preview area without stretching it."""
+        if image.ndim == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGRA)
+        elif image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
+
+        source_height, source_width = image.shape[:2]
+        scale = min(
+            HUNT_IMAGE_WIDTH / source_width,
+            HUNT_IMAGE_HEIGHT / source_height,
+        )
+        target_width = max(1, round(source_width * scale))
+        target_height = max(1, round(source_height * scale))
+        interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+        resized = cv2.resize(
+            image,
+            (target_width, target_height),
+            interpolation=interpolation,
+        )
+
+        # A transparent canvas lets the card background show around images
+        # that are not the same aspect ratio as the preview area.
+        canvas = np.zeros(
+            (HUNT_IMAGE_HEIGHT, HUNT_IMAGE_WIDTH, 4),
+            dtype=np.uint8,
+        )
+        x = (HUNT_IMAGE_WIDTH - target_width) // 2
+        y = (HUNT_IMAGE_HEIGHT - target_height) // 2
+        canvas[y:y + target_height, x:x + target_width] = resized
+        return canvas
+
+    def load_hunt_image(self):
+        """Display the saved hunt image when one is available."""
+        if not HUNT_IMAGE_PATH.exists():
+            return
+
+        try:
+            self.hunt_photo = tk.PhotoImage(file=str(HUNT_IMAGE_PATH))
+            self.hunt_image_label.configure(image=self.hunt_photo, text="")
+            self.image_button.configure(text="Change Shiny Image")
+        except tk.TclError as error:
+            print(f"Hunt image error: {error}")
 
     # ========================================================
     # COUNTER BUTTONS
