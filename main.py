@@ -92,7 +92,8 @@ class ShinyCounterApp(ctk.CTk):
         """Create the small, light CustomTkinter interface."""
         self.title("Shiny Hunt Counter")
         self.geometry("350x550")
-        self.resizable(False, False)
+        self.minsize(350, 550)
+        self.resizable(True, True)
         self.configure(fg_color="#F7F8FA")
 
         self.grid_columnconfigure(0, weight=1)
